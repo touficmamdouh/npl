@@ -10,6 +10,20 @@ an on-demand speed test, and local network information.
 - Textual 8.2.7
 - `vnstat`, `ip`, `nmcli`, `iw`, `curl`, `ping`
 
+## One-line install
+
+Run as your normal user, not with `sudo`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/touficmamdouh/npl/main/install.sh | bash
+```
+
+The installer adds any missing system packages, enables `vnstat`, creates a
+private virtual environment for Textual, and links the command as
+`/usr/local/bin/npl`.
+
+## Manual install
+
 Install the Python dependency if it is missing:
 
 ```bash
