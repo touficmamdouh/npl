@@ -1,0 +1,9 @@
+# Copy to ~/.config/npl/config.toml to override defaults.
+monthly_budget_gb = 0
+ip_refresh_seconds = 60
+usage_refresh_seconds = 60
+local_refresh_seconds = 30
+speedtest_down_bytes = 10000000
+speedtest_up_bytes = 2000000
+physical_interface = ""
+vpn_interface = ""
