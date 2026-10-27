@@ -82,7 +82,6 @@ speed-test endpoints, and the configured gateway/`1.1.1.1` for latency.
 ## Verify
 
 ```bash
-python3 -m unittest discover -s tests -v
 npl --once
 npl --json | python3 -m json.tool >/dev/null
 ```
