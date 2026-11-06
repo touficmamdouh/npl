@@ -1,14 +1,15 @@
 # npl
 
-Terminal network dashboard for Linux Mint. It shows public IPv4/IPv6 details,
+Terminal network dashboard for Linux and macOS. It shows public IPv4/IPv6 details,
 separate physical and VPN usage for 24/48 hours and 7/30 days, live throughput,
 an on-demand speed test, and local network information.
 
 ## Requirements
 
-- Python 3.14
+- Python 3.11 or newer
 - Textual 8.2.7
-- `vnstat`, `ip`, `nmcli`, `iw`, `curl`, `ping`
+- Linux: `vnstat`, `ip`, `nmcli`, `iw`, `curl`, `ping`
+- macOS: `curl`, `ping`, `route`, `ifconfig`, `scutil` (optional Wi-Fi data uses `networksetup`)
 
 ## One-line install
 
@@ -18,9 +19,10 @@ Run as your normal user, not with `sudo`:
 curl -fsSL https://raw.githubusercontent.com/touficmamdouh/npl/main/install.sh | bash
 ```
 
-The installer adds any missing system packages, enables `vnstat`, creates a
-private virtual environment for Textual, and links the command as
-`/usr/local/bin/npl`.
+On Linux, the installer adds missing system packages, enables `vnstat`, creates
+a private virtual environment for Textual, and links the command as
+`/usr/local/bin/npl`. On macOS it skips Linux package management and installs
+the launcher in `~/.local/bin/npl`.
 
 ## Manual install
 
@@ -74,6 +76,11 @@ Physical and VPN usage are always separate and never added together. The
 monthly budget uses the physical interface because it best matches the
 provider quota.
 
+On macOS, live interface counters and current network details are supported.
+Historical usage requires `vnstat`, which is Linux-specific, so the history
+panels show unavailable history until a future local history collector is
+added.
+
 When ICMP is unavailable, latency falls back to TCP connection time for the
 gateway (`:53`) and `1.1.1.1` (`:443`), so the tool does not need root.
 
@@ -92,6 +99,30 @@ speed-test endpoints, and the configured gateway/`1.1.1.1` for latency.
 - Speed-test rates are reported in Mbit/s.
 - Cloudflare's speed-test endpoints may be blocked on some networks.
 - IPv6 is shown as `N/A` when the machine has no global IPv6 route.
+
+## Build distributable artifacts
+
+Install the runtime and build dependencies in a build environment:
+
+```bash
+python3 -m pip install -r requirements.txt -r requirements-build.txt
+```
+
+Build a Linux AppImage (run on Linux, with `appimagetool` available):
+
+```bash
+./packaging/build-appimage.sh
+```
+
+This produces `npl-<architecture>.AppImage`. The AppImage is Linux-only. Build the
+macOS terminal executable on macOS:
+
+```bash
+./packaging/build-macos-app.sh
+```
+
+The macOS build produces a PyInstaller executable for the current Mac
+architecture. Cross-compiling between Linux and macOS is not supported.
 
 ## Verify
 

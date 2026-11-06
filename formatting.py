@@ -9,6 +9,13 @@ IEC_UNITS = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
 SPARK_CHARS = "▁▂▃▄▅▆▇█"
 
 
+def _number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def format_bytes(value: float | int | None) -> str:
     if value is None:
         return "N/A"
@@ -69,10 +76,16 @@ def _window_sum(
     rx = 0
     tx = 0
     for item in entries or []:
-        timestamp = item.get("timestamp")
+        if not isinstance(item, dict):
+            continue
+        timestamp = _number(item.get("timestamp"))
         if timestamp is not None and timestamp >= cutoff:
-            rx += int(item.get("rx", 0) or 0)
-            tx += int(item.get("tx", 0) or 0)
+            rx_value = _number(item.get("rx", 0))
+            tx_value = _number(item.get("tx", 0))
+            if rx_value is not None:
+                rx += int(rx_value)
+            if tx_value is not None:
+                tx += int(tx_value)
     return {"rx": rx, "tx": tx}
 
 
@@ -95,9 +108,9 @@ def available_days(
     now: datetime,
 ) -> int:
     timestamps = [
-        item["timestamp"]
+        _number(item.get("timestamp"))
         for item in (days or [])
-        if item.get("timestamp") is not None
+        if isinstance(item, dict) and _number(item.get("timestamp")) is not None
     ]
     if not timestamps:
         return 0
@@ -113,13 +126,22 @@ def month_usage(
     rx = 0
     tx = 0
     for item in traffic.get("month", []) or []:
-        stamp = item.get("timestamp")
+        if not isinstance(item, dict):
+            continue
+        stamp = _number(item.get("timestamp"))
         if stamp is None:
             continue
-        entry_dt = datetime.fromtimestamp(stamp, tz=now.tzinfo)
+        try:
+            entry_dt = datetime.fromtimestamp(stamp, tz=now.tzinfo)
+        except (OverflowError, OSError, ValueError):
+            continue
         if entry_dt.year == now.year and entry_dt.month == now.month:
-            rx += int(item.get("rx", 0) or 0)
-            tx += int(item.get("tx", 0) or 0)
+            rx_value = _number(item.get("rx", 0))
+            tx_value = _number(item.get("tx", 0))
+            if rx_value is not None:
+                rx += int(rx_value)
+            if tx_value is not None:
+                tx += int(tx_value)
     return {"rx": rx, "tx": tx}
 
 
@@ -130,14 +152,21 @@ def daily_series(
 ) -> list[int]:
     buckets: dict[str, int] = {}
     for item in days or []:
-        stamp = item.get("timestamp")
+        if not isinstance(item, dict):
+            continue
+        stamp = _number(item.get("timestamp"))
         if stamp is None:
             continue
-        key = datetime.fromtimestamp(stamp, tz=now.tzinfo).date().isoformat()
+        try:
+            key = datetime.fromtimestamp(stamp, tz=now.tzinfo).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            continue
+        rx_value = _number(item.get("rx", 0))
+        tx_value = _number(item.get("tx", 0))
         buckets[key] = (
             buckets.get(key, 0)
-            + int(item.get("rx", 0) or 0)
-            + int(item.get("tx", 0) or 0)
+            + (int(rx_value) if rx_value is not None else 0)
+            + (int(tx_value) if tx_value is not None else 0)
         )
     return [
         buckets.get((now.date() - timedelta(days=offset)).isoformat(), 0)

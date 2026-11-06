@@ -106,6 +106,8 @@ def parse_network(
     links = {
         entry["ifname"]: entry for entry in address_json if "ifname" in entry
     }
+    if preferred and preferred not in links:
+        raise ValueError(f"interface {preferred!r} was not found")
     types = _parse_nmcli_types(nmcli_text)
     vpn_candidates = [
         name
@@ -197,6 +199,27 @@ def discover_network(
     preferred: str | None = None,
     runner: Runner = run_command,
 ) -> NetworkInfo:
+    import sys
+
+    if sys.platform == "darwin":
+        from platform_collectors import MacOSCollector
+
+        snapshot = MacOSCollector(runner=runner).discover(preferred=preferred)
+        return NetworkInfo(
+            hostname=snapshot.hostname,
+            physical_interface=snapshot.interface,
+            vpn_interface=snapshot.vpn_interface,
+            gateway=snapshot.gateway,
+            ipv4=snapshot.ipv4,
+            ipv6=snapshot.ipv6,
+            mac=snapshot.mac,
+            dns=snapshot.dns,
+            ssid=snapshot.ssid,
+            signal_dbm=snapshot.signal_dbm,
+            rx_bitrate_mbps=snapshot.rx_bitrate_mbps,
+            tx_bitrate_mbps=snapshot.tx_bitrate_mbps,
+        )
+
     import socket
 
     address_json = _decode_json(
@@ -292,8 +315,8 @@ def _public_from_payload(
     vpn_active: bool,
     stale_seconds: int,
 ) -> PublicIPInfo:
-    ipv4 = payload.get("v4") or {}
-    ipv6 = payload.get("v6") or {}
+    ipv4 = payload.get("v4") if isinstance(payload.get("v4"), dict) else {}
+    ipv6 = payload.get("v6") if isinstance(payload.get("v6"), dict) else {}
     primary = ipv4 if ipv4 else ipv6
     asn, isp = _parse_org(primary.get("org"))
     return PublicIPInfo(
@@ -326,9 +349,13 @@ def read_ip_info(
             cached_text = ""
         payload = _decode_json(CommandResult(cached_text, bool(cached_text), ""), None)
         if isinstance(payload, dict):
-            age = now.timestamp() - float(payload.get("timestamp", 0))
-            if 0 <= age < 600:
-                return _public_from_payload(payload, vpn_active, 0)
+            try:
+                age = now.timestamp() - float(payload.get("timestamp", 0))
+            except (TypeError, ValueError, OverflowError):
+                payload = None
+            else:
+                if 0 <= age < 600:
+                    return _public_from_payload(payload, vpn_active, 0)
 
     ipv4 = fetcher("4")
     ipv6 = fetcher("6")
@@ -338,17 +365,24 @@ def read_ip_info(
             "v4": ipv4,
             "v6": ipv6,
         }
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
-            json.dumps(payload, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        cache_path.chmod(0o600)
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            cache_path.chmod(0o600)
+        except OSError:
+            pass
         return _public_from_payload(payload, vpn_active, 0)
 
     if isinstance(payload, dict):
-        age = max(0, int(now.timestamp() - float(payload.get("timestamp", 0))))
-        return _public_from_payload(payload, vpn_active, age)
+        try:
+            age = max(0, int(now.timestamp() - float(payload.get("timestamp", 0))))
+        except (TypeError, ValueError, OverflowError):
+            pass
+        else:
+            return _public_from_payload(payload, vpn_active, age)
 
     return PublicIPInfo(
         ipv4=None,
@@ -397,6 +431,13 @@ def read_net_counters(
 ) -> tuple[int, int] | None:
     if not interface:
         return None
+    import sys
+
+    if sys.platform == "darwin":
+        from platform_collectors import MacOSCollector
+
+        return MacOSCollector().read_counters(interface)
+
     try:
         lines = Path(proc_path).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -491,6 +532,24 @@ def run_speedtest(
     runner: Runner = run_command,
     ping_fn: Callable[[str | None], float | None] = internet_latency,
 ) -> dict[str, Any]:
+    max_download_bytes = 100_000_000
+    max_upload_bytes = 100_000_000
+    if int(down_bytes) > max_download_bytes:
+        return {
+            "download_bps": None,
+            "upload_bps": None,
+            "latency_ms": None,
+            "bytes_used": 0,
+            "error": "download size too large",
+        }
+    if int(up_bytes) > max_upload_bytes:
+        return {
+            "download_bps": None,
+            "upload_bps": None,
+            "latency_ms": None,
+            "bytes_used": 0,
+            "error": "upload size too large",
+        }
     download_url = (
         f"https://speed.cloudflare.com/__down?bytes={int(down_bytes)}"
     )

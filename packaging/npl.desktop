@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=NPL
+Comment=Terminal network dashboard
+Exec=AppRun
+Terminal=true
+Categories=System;Network;

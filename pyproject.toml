@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "npl"
+version = "0.1.0"
+description = "Terminal network dashboard"
+requires-python = ">=3.11"
+dependencies = ["textual==8.2.7"]
+
+[project.scripts]
+npl = "npl:main"
+
+[tool.setuptools]
+py-modules = ["npl", "collectors", "formatting", "platform_collectors"]

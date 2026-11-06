@@ -5,18 +5,18 @@ REPO_URL="${NPL_REPO_URL:-https://github.com/touficmamdouh/npl.git}"
 INSTALL_DIR="${NPL_INSTALL_DIR:-$HOME/.local/share/npl}"
 SKIP_APT="${NPL_SKIP_APT:-0}"
 SKIP_SYMLINK="${NPL_SKIP_SYMLINK:-0}"
+OS_NAME="$(uname -s)"
 
 if [[ $EUID -eq 0 ]]; then
   echo "Run this installer as your normal user; it will ask for sudo when needed." >&2
   exit 1
 fi
 
-if ! command -v sudo >/dev/null 2>&1; then
-  echo "sudo is required to install system packages." >&2
-  exit 1
-fi
-
-if [[ "$SKIP_APT" != "1" ]]; then
+if [[ "$OS_NAME" == "Linux" && "$SKIP_APT" != "1" ]]; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required to install system packages." >&2
+    exit 1
+  fi
   missing=()
   command -v curl >/dev/null 2>&1 || missing+=(curl)
   command -v git >/dev/null 2>&1 || missing+=(git)
@@ -44,6 +44,9 @@ if [[ "$SKIP_APT" != "1" ]]; then
   fi
 
   sudo systemctl enable --now vnstat >/dev/null 2>&1 || true
+elif [[ "$OS_NAME" != "Darwin" && "$OS_NAME" != "Linux" ]]; then
+  echo "Unsupported operating system: $OS_NAME" >&2
+  exit 1
 fi
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -62,7 +65,17 @@ python3 -m venv "$INSTALL_DIR/.venv"
 chmod +x "$INSTALL_DIR/bin/npl"
 
 if [[ "$SKIP_SYMLINK" != "1" ]]; then
-  sudo ln -sfn "$INSTALL_DIR/bin/npl" /usr/local/bin/npl
+  if [[ "$OS_NAME" == "Linux" ]]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+      echo "sudo is required to install /usr/local/bin/npl; use NPL_SKIP_SYMLINK=1" >&2
+      exit 1
+    fi
+    sudo ln -sfn "$INSTALL_DIR/bin/npl" /usr/local/bin/npl
+  else
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$INSTALL_DIR/bin/npl" "$HOME/.local/bin/npl"
+    echo "Add $HOME/.local/bin to PATH if needed."
+  fi
 fi
 
 "$INSTALL_DIR/bin/npl" --version
