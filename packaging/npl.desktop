@@ -4,4 +4,5 @@ Name=NPL
 Comment=Terminal network dashboard
 Exec=AppRun
 Terminal=true
-Categories=System;Network;
+Categories=Network;
+Icon=npl

@@ -13,6 +13,7 @@ class TestPackagingScaffolding(unittest.TestCase):
             "packaging/build-appimage.sh",
             "packaging/AppRun",
             "packaging/npl.desktop",
+            "packaging/npl.svg",
             "packaging/build-macos-app.sh",
         ):
             with self.subTest(relative=relative):

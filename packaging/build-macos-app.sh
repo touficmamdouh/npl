@@ -17,5 +17,5 @@ rm -rf "$BUILD_DIR"
 cd "$ROOT"
 python3 -m PyInstaller --clean --noconfirm --name npl \
   --distpath "$BUILD_DIR/dist" --workpath "$BUILD_DIR/work" \
-  --specpath "$BUILD_DIR" "$ROOT/packaging/npl.spec"
+  "$ROOT/packaging/npl.spec"
 echo "Built $BUILD_DIR/dist/npl for this Mac architecture"
