@@ -7,4 +7,6 @@ __pycache__/
 .vscode/
 .DS_Store
 .superpowers/
+build/
+npl-*.AppImage
 docs/
