@@ -22,6 +22,7 @@ from collectors import (
 from formatting import render_dashboard
 
 APP_VERSION = "0.1.0"
+SAMPLE_INTERVAL_SECONDS = 2.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -87,7 +88,7 @@ class NplApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.set_interval(1.0, self.tick)
+        self.set_interval(SAMPLE_INTERVAL_SECONDS, self.tick)
         refresh_seconds = min(
             float(self.config.get("usage_refresh_seconds", 60)),
             float(self.config.get("local_refresh_seconds", 30)),
@@ -111,6 +112,10 @@ class NplApp(App):
             return
         now = time.monotonic()
         counters = read_net_counters(self.selected_interface)
+        if counters == self.previous_counters:
+            self.previous_time = now
+            return
+        view_changed = False
         if counters and self.previous_counters and self.previous_time:
             rate = rates_from_counters(
                 self.previous_counters,
@@ -119,9 +124,11 @@ class NplApp(App):
             )
             self.samples.append(rate)
             self.samples = self.samples[-60:]
+            view_changed = True
         self.previous_counters = counters
         self.previous_time = now
-        self.update_view()
+        if view_changed:
+            self.update_view()
 
     def action_refresh(self) -> None:
         self.warning = "Refreshing..."
