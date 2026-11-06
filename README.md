@@ -66,8 +66,9 @@ consume about 12 MB per run.
 
 ## Data Sources
 
-- `vnstat --json` supplies 24/48-hour and 7/30-day usage.
-- `/proc/net/dev` supplies live throughput.
+- Linux `vnstat --json` supplies historical usage; macOS counter samples are
+  stored locally while NPL runs.
+- `/proc/net/dev` on Linux and `netstat -ib` on macOS supply interface counters.
 - `ipinfo.io` supplies public IP metadata.
 - Cloudflare speed endpoints supply the on-demand speed test.
 - `ip`, `nmcli`, `iw`, and `ping` supply local network details.
@@ -76,10 +77,11 @@ Physical and VPN usage are always separate and never added together. The
 monthly budget uses the physical interface because it best matches the
 provider quota.
 
-On macOS, live interface counters and current network details are supported.
-Historical usage requires `vnstat`, which is Linux-specific, so the history
-panels show unavailable history until a future local history collector is
-added.
+On macOS, NPL records interface counter deltas locally while it runs and uses
+them for usage history. History starts with the first sample and grows while
+NPL is running; it cannot reconstruct traffic from before NPL began collecting.
+The history is stored in `~/.local/state/npl/usage-history.json` (or under
+`$XDG_STATE_HOME/npl/usage-history.json`).
 
 When ICMP is unavailable, latency falls back to TCP connection time for the
 gateway (`:53`) and `1.1.1.1` (`:443`), so the tool does not need root.

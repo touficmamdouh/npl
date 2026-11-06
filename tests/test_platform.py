@@ -49,6 +49,63 @@ class TestPlatformCollectors(unittest.TestCase):
         self.assertEqual(snapshot.mac, "00:11:22:33:44:55")
         self.assertEqual(snapshot.dns, ["192.168.1.1", "1.1.1.1"])
 
+    def test_macos_collector_uses_active_hardware_when_default_is_tunnel(self):
+        runner = FakeRunner(
+            {
+                ("ifconfig", "-l"): CommandResult(
+                    "lo0 gif0 en0 en2 utun0\n", True
+                ),
+                ("route", "-n", "get", "default"): CommandResult(
+                    "gateway: 192.0.2.1\ninterface: gif0\n", True
+                ),
+                ("networksetup", "-listallhardwareports"): CommandResult(
+                    "Hardware Port: Wi-Fi\nDevice: en0\n\n"
+                    "Hardware Port: Ethernet\nDevice: en2\n", True
+                ),
+                ("ifconfig", "en0"): CommandResult(
+                    "en0: flags=8863<UP,BROADCAST,RUNNING>\n"
+                    "\tstatus: active\n", True
+                ),
+                ("ifconfig", "en2"): CommandResult(
+                    "en2: flags=8863<UP,BROADCAST>\n"
+                    "\tstatus: inactive\n", True
+                ),
+                ("ifconfig", "gif0"): CommandResult("gif0: flags=8051\n", True),
+                ("scutil", "--dns"): CommandResult("", True),
+                ("networksetup", "-getairportnetwork", "en0"): CommandResult(
+                    "Current Wi-Fi Network: Test Network\n", True
+                ),
+            }
+        )
+
+        snapshot = MacOSCollector(runner=runner).discover()
+
+        self.assertEqual(snapshot.interface, "en0")
+
+    def test_macos_collector_falls_back_to_en0_if_hardware_lookup_fails(self):
+        runner = FakeRunner(
+            {
+                ("ifconfig", "-l"): CommandResult(
+                    "lo0 gif0 en3 en1 en0 utun0\n", True
+                ),
+                ("route", "-n", "get", "default"): CommandResult(
+                    "interface: gif0\n", True
+                ),
+                ("networksetup", "-listallhardwareports"): CommandResult(
+                    "", False, "unavailable"
+                ),
+                ("ifconfig", "en0"): CommandResult(
+                    "en0: flags=8863<UP,BROADCAST,RUNNING>\n", True
+                ),
+                ("scutil", "--dns"): CommandResult("", True),
+                ("networksetup", "-getairportnetwork", "en0"): CommandResult(
+                    "", False, "unavailable"
+                ),
+            }
+        )
+
+        self.assertEqual(MacOSCollector(runner=runner).discover().interface, "en0")
+
     def test_invalid_override_does_not_fall_back_silently(self):
         runner = FakeRunner(
             {

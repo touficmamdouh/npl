@@ -90,6 +90,34 @@ class MacOSCollector:
             return []
         return [item for item in result.stdout.split() if item and item != "lo0"]
 
+    def _hardware_interfaces(self) -> list[str]:
+        result = self.runner(["networksetup", "-listallhardwareports"])
+        ports = re.findall(
+            r"Hardware Port:\s*([^\n]+)\s*\nDevice:\s*([^\n]+)",
+            result.stdout if result.ok else "",
+        )
+        if not ports:
+            candidates = [
+                item for item in self._interfaces() if re.fullmatch(r"en\d+", item)
+            ]
+            return sorted(candidates, key=lambda item: (item != "en0", item))
+        return [
+            device.strip()
+            for port, device in ports
+            if port.strip().lower() not in {"thunderbolt bridge", "bridge"}
+            and not device.strip().startswith(
+                ("bridge", "utun", "gif", "stf", "awdl", "llw", "lo")
+            )
+        ]
+
+    def _active_hardware_interface(self) -> str | None:
+        interfaces = self._hardware_interfaces()
+        for interface in interfaces:
+            result = self.runner(["ifconfig", interface])
+            if result.ok and re.search(r"^\s*status:\s*active\s*$", result.stdout, re.MULTILINE):
+                return interface
+        return interfaces[0] if interfaces else None
+
     def discover(self, preferred: str | None = None) -> NetworkSnapshot:
         interfaces = self._interfaces()
         vpn_interface = next(
@@ -109,8 +137,10 @@ class MacOSCollector:
                 f"interface {preferred!r} was not found; available: {', '.join(interfaces)}"
             )
         interface = preferred or route_interface
+        if not preferred and interface and interface not in self._hardware_interfaces():
+            interface = self._active_hardware_interface() or interface
         if interface is None and interfaces:
-            interface = interfaces[0]
+            interface = self._active_hardware_interface() or interfaces[0]
         if preferred and not interfaces and preferred != route_interface:
             raise InterfaceOverrideError(f"interface {preferred!r} was not found")
         if interface is None:

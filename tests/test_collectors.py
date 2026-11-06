@@ -15,11 +15,13 @@ from collectors import (
     read_ip_info,
     read_net_counters,
     read_vnstat,
+    sample_macos_usage,
     run_speedtest,
     NetworkInfo,
     PublicIPInfo,
     collect_snapshot,
 )
+from formatting import usage_windows
 
 
 ADDRESS_JSON = [
@@ -227,7 +229,10 @@ class TestNetworkCollectors(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "dev"
             path.write_text(content)
-            self.assertEqual(read_net_counters("wlp3s0", proc_path=path), (1000, 2000))
+            with patch("collectors.sys.platform", "linux"):
+                self.assertEqual(
+                    read_net_counters("wlp3s0", proc_path=path), (1000, 2000)
+                )
             self.assertIsNone(read_net_counters("missing", proc_path=path))
 
     def test_rates_from_counters_handles_elapsed_time(self):
@@ -322,6 +327,72 @@ NOW = datetime(2026, 10, 27, 14, 0, tzinfo=timezone.utc)
 
 
 class TestSnapshot(unittest.TestCase):
+    def test_macos_usage_history_uses_counter_deltas(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usage.json"
+            readings = iter([(1000, 2000), (1600, 2800)])
+            reader = lambda _interface: next(readings)
+            sample_macos_usage(["en0"], NOW, path, reader)
+            histories = sample_macos_usage(
+                ["en0"], NOW + timedelta(seconds=30), path, reader
+            )
+
+        traffic = histories["en0"]
+        self.assertEqual(
+            traffic["hour"],
+            [{"timestamp": int(NOW.timestamp()) // 300 * 300, "rx": 600, "tx": 800}],
+        )
+        self.assertEqual(
+            usage_windows(traffic, NOW + timedelta(seconds=30))["last_24h"],
+            {"rx": 600, "tx": 800},
+        )
+
+    def test_macos_snapshot_uses_persisted_local_history(self):
+        network = NetworkInfo(
+            hostname="mac",
+            physical_interface="en0",
+            vpn_interface="utun0",
+        )
+        public = PublicIPInfo(
+            ipv4="203.0.113.10",
+            ipv6=None,
+            isp="Example ISP",
+            asn=None,
+            city=None,
+            region=None,
+            country="EG",
+            vpn_active=True,
+        )
+        traffic = {
+            "hour": [{"timestamp": NOW.timestamp(), "rx": 900, "tx": 400}],
+            "day": [{"timestamp": NOW.timestamp(), "rx": 900, "tx": 400}],
+            "month": [{"timestamp": NOW.timestamp(), "rx": 900, "tx": 400}],
+        }
+        with patch("collectors.sys.platform", "darwin"), patch(
+            "collectors.discover_network", return_value=network
+        ), patch("collectors.read_ip_info", return_value=public), patch(
+            "collectors.sample_macos_usage",
+            return_value={"en0": traffic, "utun0": {}},
+        ) as sample_history, patch(
+            "collectors.ping_average", side_effect=[None, None]
+        ):
+            snapshot = collect_snapshot(
+                {
+                    "monthly_budget_gb": 0,
+                    "speedtest_down_bytes": 1,
+                    "speedtest_up_bytes": 1,
+                },
+                now=NOW,
+            )
+
+        sample_history.assert_called_once_with(["en0", "utun0"], NOW)
+        self.assertEqual(
+            snapshot["usage"]["physical"]["last_24h"],
+            {"rx": 900, "tx": 400},
+        )
+        self.assertEqual(snapshot["usage"]["physical"]["history_source"], "local")
+        self.assertEqual(snapshot["usage"]["vpn"]["last_24h"], {"rx": 0, "tx": 0})
+
     def test_collect_snapshot_separates_physical_and_vpn_usage(self):
         network = NetworkInfo(
             hostname="t9-iMac",
@@ -357,7 +428,7 @@ class TestSnapshot(unittest.TestCase):
             "collectors.read_ip_info", return_value=public
         ), patch("collectors.read_vnstat", side_effect=[traffic, {}]), patch(
             "collectors.ping_average", side_effect=[2.0, 27.0]
-        ):
+        ), patch("collectors.sys.platform", "linux"):
             snapshot = collect_snapshot(
                 {
                     "monthly_budget_gb": 1,
