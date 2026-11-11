@@ -25,7 +25,7 @@ from collectors import (
 from formatting import render_dashboard
 from usage_collectors import CollectorUnavailable, iter_usage_samples
 from usage_formatting import render_usage_report
-from usage_store import UsageStore, period_bounds
+from usage_store import UsageRecorderLocked, UsageRecorderLock, UsageStore, period_bounds
 from usage_services import (
     ServiceUnavailable,
     install_usage_service,
@@ -95,28 +95,32 @@ def default_usage_database() -> Path:
 
 
 def run_usage_record(args: argparse.Namespace) -> int:
-    store = UsageStore(args.database or default_usage_database())
+    database = args.database or default_usage_database()
     try:
-        for deltas in iter_usage_samples(float(args.interval)):
-            store.record_deltas(deltas)
-            cutoff = time.time() - max(1, int(args.retention_days)) * 86400
-            store.prune(cutoff)
+        with UsageRecorderLock(database):
+            with UsageStore(database) as store:
+                for deltas in iter_usage_samples(float(args.interval)):
+                    store.record_deltas(deltas)
+                    cutoff = time.time() - max(1, int(args.retention_days)) * 86400
+                    store.prune(cutoff)
     except KeyboardInterrupt:
         return 0
+    except UsageRecorderLocked as exc:
+        print(f"npl usage: {exc}; stop the other recorder first", file=sys.stderr)
+        return 1
     except CollectorUnavailable as exc:
         print(f"npl usage: {exc}", file=sys.stderr)
         return 1
-    finally:
-        store.close()
     return 0
 
 
 def run_usage_report(args: argparse.Namespace) -> int:
-    now = datetime.now().astimezone()
+    now = datetime.now()
     start, end = period_bounds(args.period, now)
     store = UsageStore(args.database or default_usage_database())
     try:
         rows = store.summarize(start, end, args.limit)
+        period_total = store.period_total(start, end)
         started_at = store.first_observed_at()
     finally:
         store.close()
@@ -128,6 +132,7 @@ def run_usage_report(args: argparse.Namespace) -> int:
             period=args.period,
             source=source,
             started_at=started_at,
+            total_bytes=period_total,
             json_output=args.json,
         )
     )

@@ -1,7 +1,9 @@
 import tempfile
 import unittest
+from io import StringIO
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from usage_collectors import (
     CollectorUnavailable,
@@ -44,16 +46,31 @@ class TestUsageParsers(unittest.TestCase):
         self.assertEqual(rows[0].rx_bytes, 2048)
         self.assertEqual(rows[0].tx_bytes, 1024)
 
+    def test_parse_nettop_ignores_trailing_empty_csv_field(self):
+        rows = parse_nettop("bytes_in,bytes_out\ntime,Safari.42,2048,1024,\n")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].rx_bytes, 2048)
+
+    def test_parse_nethogs_accepts_finite_exponent_numbers(self):
+        rows = parse_nethogs_trace("/usr/bin/curl/42/1000\t1e+06\t2e+06\n")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tx_bytes, 1_000_000)
+        self.assertEqual(rows[0].rx_bytes, 2_000_000)
+
 
 class TestDeltaTracker(unittest.TestCase):
-    def _row(self, rx: int, tx: int, pid: int = 42) -> CumulativeProcessUsage:
+    def _row(
+        self, rx: int, tx: int, pid: int = 42, session: str | None = None
+    ) -> CumulativeProcessUsage:
         return CumulativeProcessUsage(
             source="test",
             process_key=f"curl:/usr/bin/curl:{pid}",
             name="curl",
             path="/usr/bin/curl",
             pid=pid,
-            session=f"{pid}:1",
+            session=session or f"{pid}:1",
             interface="eth0",
             rx_bytes=rx,
             tx_bytes=tx,
@@ -79,11 +96,47 @@ class TestDeltaTracker(unittest.TestCase):
 
     def test_pid_reuse_does_not_mix_sessions(self):
         tracker = DeltaTracker()
-        tracker.update([self._row(100, 50, pid=42)], OBSERVED)
+        tracker.update([self._row(100, 50, pid=42, session="old")], OBSERVED)
 
-        rows = tracker.update([self._row(300, 100, pid=43)], OBSERVED)
+        rows = tracker.update([self._row(300, 100, pid=42, session="new")], OBSERVED)
 
         self.assertEqual(rows, [])
+
+
+class _FakeProcess:
+    def __init__(self, output: str):
+        self.stdout = StringIO(output)
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+class TestNethogsCollector(unittest.TestCase):
+    def test_reuses_one_long_lived_process_for_multiple_refreshes(self):
+        output = (
+            "Refreshing:\n"
+            "/usr/bin/curl/42/1000\t100\t200\n"
+            "Refreshing:\n"
+            "/usr/bin/curl/42/1000\t300\t500\n"
+            "Refreshing:\n"
+        )
+        fake_process = _FakeProcess(output)
+        with patch("usage_collectors.subprocess.Popen", return_value=fake_process) as popen:
+            collector = NethogsCollector(interval=5)
+            first = collector.collect()
+            second = collector.collect()
+            collector.close()
+
+        self.assertEqual(first[0].tx_bytes, 100)
+        self.assertEqual(second[0].rx_bytes, 500)
+        popen.assert_called_once()
 
 
 class TestCollectorSelection(unittest.TestCase):

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import os
+import fcntl
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -47,6 +49,47 @@ class UsageTotal:
     total_bytes: int
 
 
+class UsageRecorderLocked(RuntimeError):
+    """Another recorder already owns this database."""
+
+
+class UsageRecorderLock:
+    def __init__(self, database: Path | str) -> None:
+        database = Path(database)
+        self.path = database.with_name(database.name + ".lock")
+        self._handle = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.close()
+            raise UsageRecorderLocked(
+                f"another usage recorder is already using {self.path.parent}"
+            ) from exc
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()))
+        handle.flush()
+        self._handle = handle
+
+    def release(self) -> None:
+        if self._handle is None:
+            return
+        fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        self._handle.close()
+        self._handle = None
+
+    def __enter__(self) -> "UsageRecorderLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.release()
+
+
 def _epoch(value: datetime) -> float:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
@@ -55,9 +98,7 @@ def _epoch(value: datetime) -> float:
 
 def period_bounds(period: str, now: datetime | None = None) -> tuple[float, float]:
     """Return the local-calendar start and current end for a report period."""
-    now = now or datetime.now().astimezone()
-    if now.tzinfo is None:
-        now = now.astimezone()
+    now = now or datetime.now()
     if period == "today":
         start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
     elif period == "week":
@@ -143,12 +184,12 @@ class UsageStore:
         end_value = _epoch(end) if isinstance(end, datetime) else float(end)
         rows = self.connection.execute(
             """
-            SELECT process_key, MAX(name) AS name, MAX(path) AS path,
+            SELECT MIN(process_key) AS process_key, name, path,
                    MAX(source) AS source,
                    SUM(rx_bytes) AS rx_bytes, SUM(tx_bytes) AS tx_bytes
             FROM usage_samples
             WHERE observed_at >= ? AND observed_at < ?
-            GROUP BY process_key
+            GROUP BY name, path
             ORDER BY (SUM(rx_bytes) + SUM(tx_bytes)) DESC, name ASC
             LIMIT ?
             """,
@@ -166,6 +207,19 @@ class UsageStore:
             )
             for row in rows
         ]
+
+    def period_total(self, start: float, end: float) -> int:
+        start_value = _epoch(start) if isinstance(start, datetime) else float(start)
+        end_value = _epoch(end) if isinstance(end, datetime) else float(end)
+        row = self.connection.execute(
+            """
+            SELECT COALESCE(SUM(rx_bytes + tx_bytes), 0) AS total_bytes
+            FROM usage_samples
+            WHERE observed_at >= ? AND observed_at < ?
+            """,
+            (start_value, end_value),
+        ).fetchone()
+        return int(row["total_bytes"])
 
     def prune(self, before: datetime | float) -> int:
         cutoff = _epoch(before) if isinstance(before, datetime) else float(before)

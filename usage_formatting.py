@@ -30,13 +30,18 @@ def render_usage_report(
     source: str | None,
     started_at: str | datetime | None,
     json_output: bool = False,
+    total_bytes: int | None = None,
 ) -> str:
     rows = list(rows)
-    total_bytes = sum(row.total_bytes for row in rows)
+    period_total = (
+        sum(row.total_bytes for row in rows)
+        if total_bytes is None
+        else max(0, int(total_bytes))
+    )
     started = _started_value(started_at)
     payload_rows: list[dict[str, Any]] = []
     for row in rows:
-        share = (row.total_bytes / total_bytes * 100) if total_bytes else 0.0
+        share = (row.total_bytes / period_total * 100) if period_total else 0.0
         payload_rows.append(
             {
                 "name": row.name,
@@ -54,7 +59,7 @@ def render_usage_report(
                 "period": period,
                 "source": source,
                 "recorded_since": started,
-                "total_bytes": total_bytes,
+                "total_bytes": period_total,
                 "rows": payload_rows,
             },
             ensure_ascii=False,
@@ -81,6 +86,6 @@ def render_usage_report(
             f"{payload['share_percent']:>7.1f}%"
         )
     lines.append("")
-    lines.append(f"Total: {_format_bytes(total_bytes)}")
+    lines.append(f"Total: {_format_bytes(period_total)}")
     return "\n".join(lines)
 

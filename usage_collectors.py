@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import os
 import re
 import subprocess
@@ -34,17 +35,22 @@ class CumulativeProcessUsage:
 
 _NUMBER = re.compile(r"^-?(?:\d+(?:\.\d*)?|\.\d+)$")
 _NETHOGS_IDENTITY = re.compile(r"^(?P<path>.+)/(?P<pid>\d+)/(?P<uid>\d+)$")
+_MAX_COUNTER = 2**63 - 1
 
 
 def _parse_bytes(value: str) -> int | None:
     value = value.strip()
-    if not _NUMBER.match(value):
+    if not _NUMBER.match(value) and not re.match(
+        r"^-?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+$", value
+    ):
         return None
     try:
         parsed = float(value)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
-    return int(parsed) if parsed >= 0 else None
+    if not math.isfinite(parsed) or parsed < 0 or parsed > _MAX_COUNTER:
+        return None
+    return int(parsed)
 
 
 def _name_from_identity(identity: str) -> tuple[str, str | None, int | None, str | None]:
@@ -99,7 +105,9 @@ def parse_nettop(text: str) -> list[CumulativeProcessUsage]:
 
     rows: list[CumulativeProcessUsage] = []
     for raw_line in lines[header_index + 1 :]:
-        parts = next(csv.reader([raw_line]), [])
+        parts = [part.strip() for part in next(csv.reader([raw_line]), [])]
+        while parts and not parts[-1]:
+            parts.pop()
         if len(parts) < 3:
             continue
         process_id, rx_text, tx_text = [part.strip() for part in parts[-3:]]
@@ -129,7 +137,7 @@ def parse_nettop(text: str) -> list[CumulativeProcessUsage]:
 
 class DeltaTracker:
     def __init__(self) -> None:
-        self._baselines: dict[str, tuple[int, int]] = {}
+        self._baselines: dict[tuple[str, str | None], tuple[int, int]] = {}
 
     def update(
         self,
@@ -137,13 +145,14 @@ class DeltaTracker:
         observed_at: datetime,
     ) -> list[UsageDelta]:
         deltas: list[UsageDelta] = []
-        current_keys: set[str] = set()
+        current_keys: set[tuple[str, str | None]] = set()
         for row in cumulative_rows:
             if row.rx_bytes < 0 or row.tx_bytes < 0:
                 continue
-            current_keys.add(row.process_key)
-            previous = self._baselines.get(row.process_key)
-            self._baselines[row.process_key] = (row.rx_bytes, row.tx_bytes)
+            key = (row.process_key, row.session)
+            current_keys.add(key)
+            previous = self._baselines.get(key)
+            self._baselines[key] = (row.rx_bytes, row.tx_bytes)
             if previous is None:
                 continue
             previous_rx, previous_tx = previous
@@ -200,17 +209,64 @@ class _CommandCollector:
             )
         return result.stdout
 
+    def close(self) -> None:
+        return None
+
 
 class NethogsCollector(_CommandCollector):
     source = "nethogs"
 
+    def __init__(self, interval: float = 5.0) -> None:
+        super().__init__(interval)
+        self._process: subprocess.Popen[str] | None = None
+        self._started_refresh = False
+        self._refresh_lines: list[str] = []
+
     def collect(self) -> list[CumulativeProcessUsage]:
         delay = max(1, round(self.interval))
-        output = self._run(
-            ["nethogs", "-t", "-v", "2", "-C", "-d", str(delay), "-c", "1"],
-            timeout=self.interval + 10,
-        )
-        return parse_nethogs_trace(output)
+        if self._process is None:
+            try:
+                self._process = subprocess.Popen(
+                    ["nethogs", "-t", "-v", "2", "-C", "-d", str(delay)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+            except FileNotFoundError as exc:
+                raise CollectorUnavailable(
+                    "nethogs is not installed; install it before recording usage"
+                ) from exc
+        assert self._process.stdout is not None
+        while True:
+            line = self._process.stdout.readline()
+            if not line:
+                returncode = self._process.poll()
+                self.close()
+                raise CollectorUnavailable(
+                    f"nethogs stopped while collecting usage (exit {returncode})"
+                )
+            if line.strip() == "Refreshing:":
+                if self._started_refresh:
+                    output = "\n".join(self._refresh_lines)
+                    self._refresh_lines = []
+                    return parse_nethogs_trace(output)
+                self._started_refresh = True
+                self._refresh_lines = []
+            elif self._started_refresh:
+                self._refresh_lines.append(line)
+
+    def close(self) -> None:
+        if self._process is not None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
+        self._process = None
+        self._started_refresh = False
+        self._refresh_lines = []
 
 
 class NettopCollector(_CommandCollector):
@@ -240,9 +296,12 @@ def iter_usage_samples(
 ) -> Iterator[list[UsageDelta]]:
     collector = collector or select_usage_collector(system)(interval)
     tracker = DeltaTracker()
-    while True:
-        rows = collector.collect()
-        observed_at = datetime.now(timezone.utc)
-        yield tracker.update(rows, observed_at)
-        time.sleep(max(1.0, float(interval)))
+    try:
+        while True:
+            rows = collector.collect()
+            observed_at = datetime.now(timezone.utc)
+            yield tracker.update(rows, observed_at)
+            time.sleep(max(1.0, float(interval)))
+    finally:
+        collector.close()
 

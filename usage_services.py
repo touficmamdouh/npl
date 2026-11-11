@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+import os
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,7 @@ def _service_path(system: str, home: Path) -> Path:
 def _executable(executable: str | None) -> str:
     if executable:
         return executable
-    return shutil.which("npl") or str(Path(sys.argv[0]).resolve())
+    return os.environ.get("APPIMAGE") or shutil.which("npl") or str(Path(sys.argv[0]).resolve())
 
 
 def _linux_unit(executable: str) -> str:
@@ -66,9 +67,9 @@ def _macos_plist(executable: str, home: Path) -> str:
         <string>record</string>
     </array>
     <key>KeepAlive</key>
-    <true/>
-    <key>RunAtLoad</key>
     <false/>
+    <key>RunAtLoad</key>
+    <true/>
     <key>StandardOutPath</key>
     <string>{log_path}</string>
     <key>StandardErrorPath</key>
@@ -84,10 +85,19 @@ def install_usage_service(
     executable: str | None = None,
     runner: Runner | None = None,
 ) -> Path:
-    del runner
     system = _normalized_system(system)
     home = home or Path.home()
     path = _service_path(system, home)
+    manager = "systemctl" if system == "linux" else "launchctl"
+    probe = (
+        [manager, "--user", "--version"]
+        if system == "linux"
+        else [manager, "help"]
+    )
+    if runner is not None:
+        _run(probe, runner)
+    elif shutil.which(manager) is None:
+        raise ServiceUnavailable(f"{manager} is not installed")
     path.parent.mkdir(parents=True, exist_ok=True)
     content = (
         _linux_unit(_executable(executable))

@@ -3,8 +3,15 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from usage_store import UsageDelta, UsageStore, period_bounds
+from usage_store import (
+    UsageDelta,
+    UsageRecorderLocked,
+    UsageRecorderLock,
+    UsageStore,
+    period_bounds,
+)
 
 
 UTC = timezone.utc
@@ -75,6 +82,32 @@ class TestUsageStore(unittest.TestCase):
             self.assertEqual(rows[0].source, "test")
             store.close()
 
+    def test_summarize_groups_process_sessions_by_program_identity(self):
+        now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(Path(directory) / "usage.db")
+            first = delta(now, rx_bytes=100, tx_bytes=0)
+            second = UsageDelta(
+                observed_at=now,
+                source="test",
+                process_key="browser:/usr/bin/browser:999",
+                name="browser",
+                path="/usr/bin/browser",
+                pid=999,
+                session="999:2",
+                interface="eth0",
+                rx_bytes=200,
+                tx_bytes=0,
+            )
+            store.record_deltas([first, second])
+
+            rows = store.summarize(now - timedelta(seconds=1), now + timedelta(seconds=1), 20)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].name, "browser")
+            self.assertEqual(rows[0].total_bytes, 300)
+            store.close()
+
     def test_limit_and_empty_report(self):
         now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
         with tempfile.TemporaryDirectory() as directory:
@@ -128,6 +161,43 @@ class TestUsageStore(unittest.TestCase):
         self.assertEqual(week_end, now.timestamp())
         self.assertEqual(month_start, datetime(2026, 11, 1, tzinfo=now.tzinfo).timestamp())
         self.assertEqual(month_end, now.timestamp())
+
+    def test_month_boundary_uses_timezone_rules_across_dst(self):
+        now = datetime(2026, 11, 15, 12, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        month_start, _ = period_bounds("month", now)
+
+        expected = datetime(2026, 11, 1, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(month_start, expected.timestamp())
+
+    def test_period_total_is_independent_of_report_limit(self):
+        now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(Path(directory) / "usage.db")
+            store.record_deltas(
+                [
+                    delta(now, process_key="large", name="large", rx_bytes=300, tx_bytes=0),
+                    delta(now, process_key="small", name="small", rx_bytes=100, tx_bytes=0),
+                ]
+            )
+
+            total = store.period_total(now - timedelta(seconds=1), now + timedelta(seconds=1))
+
+            self.assertEqual(total, 400)
+            store.close()
+
+    def test_only_one_recorder_can_hold_the_database_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "usage.db"
+            first = UsageRecorderLock(path)
+            second = UsageRecorderLock(path)
+            first.acquire()
+            try:
+                with self.assertRaises(UsageRecorderLocked):
+                    second.acquire()
+            finally:
+                first.release()
+                second.release()
 
 
 if __name__ == "__main__":

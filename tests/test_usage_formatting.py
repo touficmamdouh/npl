@@ -44,6 +44,18 @@ class TestUsageFormatting(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rx_bytes"], 200)
         self.assertEqual(payload["rows"][0]["share_percent"], 75.0)
 
+    def test_share_uses_period_total_not_displayed_limit_total(self):
+        output = render_usage_report(
+            self.rows[:1],
+            period="today",
+            source="nethogs",
+            started_at=None,
+            total_bytes=400,
+            json_output=True,
+        )
+
+        self.assertEqual(json.loads(output)["rows"][0]["share_percent"], 75.0)
+
     def test_empty_report_explains_that_recording_has_not_started(self):
         output = render_usage_report(
             [],
