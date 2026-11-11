@@ -286,6 +286,7 @@ def render_dashboard(
             f"Latency  gateway {format_latency(latency.get('gateway_ms'))} · "
             f"1.1.1.1 {format_latency(latency.get('internet_ms'))}",
             "",
+            "PROCESS USAGE  npl usage --today | --week | --month",
             "[q] Quit   [r] Refresh   [t] Speed test   [i] Switch interface   [p] Pause   [?] Help",
         ]
     )

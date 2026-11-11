@@ -155,6 +155,23 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("[t]", output)
         self.assertIn("History available", output)
 
+    def test_render_dashboard_shows_process_usage_commands(self):
+        snapshot = {
+            "timestamp": "2026-10-27T14:42:10+02:00",
+            "public": {"vpn_active": False},
+            "usage": {"physical": {}, "vpn": {}},
+            "budget": {"used": 0, "limit": None},
+            "local": {},
+            "latency": {},
+        }
+
+        output = render_dashboard(snapshot)
+
+        self.assertIn(
+            "PROCESS USAGE  npl usage --today | --week | --month",
+            output,
+        )
+
     def test_render_dashboard_handles_missing_values(self):
         snapshot = {
             "timestamp": "2026-10-27T14:42:10+02:00",
