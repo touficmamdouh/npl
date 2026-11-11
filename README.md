@@ -19,10 +19,11 @@ Run as your normal user, not with `sudo`:
 curl -fsSL https://raw.githubusercontent.com/touficmamdouh/npl/main/install.sh | bash
 ```
 
-On Linux, the installer adds missing system packages, enables `vnstat`, creates
-a private virtual environment for Textual, and links the command as
-`/usr/local/bin/npl`. On macOS it skips Linux package management and installs
-the launcher in `~/.local/bin/npl`.
+On Linux, the installer adds missing system packages, enables `vnstat`, grants
+`nethogs` the limited `cap_net_admin` and `cap_net_raw` capabilities needed for
+per-process capture, creates a private virtual environment for Textual, and
+links the command as `/usr/local/bin/npl`. On macOS it skips Linux package
+management and installs the launcher in `~/.local/bin/npl`.
 
 ## Manual install
 
@@ -86,9 +87,9 @@ npl usage month --json
 
 Use `npl usage stop-service` to stop recording and `npl usage
 uninstall-service` to remove the service file. Linux uses `nethogs` and may
-need packet-capture capabilities; macOS uses the built-in `nettop`. NPL never
-starts the service automatically and keeps the history in a local SQLite
-database.
+need packet-capture capabilities; the installer configures them automatically.
+macOS uses the built-in `nettop`. NPL never starts the service automatically
+and keeps the history in a local SQLite database.
 
 ## Configuration
 
@@ -122,7 +123,7 @@ gateway (`:53`) and `1.1.1.1` (`:443`), so the tool does not need root.
 
 ## Privacy and Safety
 
-NPL requires no root privileges, starts no daemon, and opens no listening
+NPL itself runs as the normal user, starts no daemon, and opens no listening
 port. It has no telemetry. It contacts only `ipinfo.io`, Cloudflare's
 speed-test endpoints, and the configured gateway/`1.1.1.1` for latency.
 

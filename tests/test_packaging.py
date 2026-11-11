@@ -37,6 +37,12 @@ class TestPackagingScaffolding(unittest.TestCase):
         self.assertNotIn('"nethogs"', pyproject)
         self.assertNotIn('"nettop"', pyproject)
 
+    def test_linux_installer_grants_nethogs_capture_capabilities(self):
+        installer = (ROOT / "install.sh").read_text()
+
+        self.assertIn("libcap2-bin", installer)
+        self.assertIn("cap_net_admin,cap_net_raw+eip", installer)
+
 
 if __name__ == "__main__":
     unittest.main()
