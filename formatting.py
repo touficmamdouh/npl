@@ -251,10 +251,21 @@ def render_dashboard(
     lines.append(
         f"{'7-day usage':<20}{sparkline(physical.get('daily_series', []), width=7)}"
     )
-    lines.append(
-        f"{'History available':<20}physical {physical.get('days_available', 0)} days · "
-        f"VPN {vpn.get('days_available', 0)} days"
-    )
+    if physical.get("history_source") == "local":
+        available = int(physical.get("days_available", 0) or 0)
+        if available:
+            history_text = (
+                f"local collection · physical {available} days · "
+                f"VPN {int(vpn.get('days_available', 0) or 0)} days"
+            )
+        else:
+            history_text = "collecting locally while NPL runs"
+        lines.append(f"{'History':<20}{history_text}")
+    else:
+        lines.append(
+            f"{'History available':<20}physical {physical.get('days_available', 0)} days · "
+            f"VPN {vpn.get('days_available', 0)} days"
+        )
 
     last_rx, last_tx = samples[-1] if samples else (0.0, 0.0)
     speed_header = f"LIVE SPEED · {interface}" + ("   [PAUSED]" if paused else "")

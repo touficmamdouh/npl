@@ -7,6 +7,8 @@ import os
 import re
 import socket
 import subprocess
+import sys
+import tempfile
 import time
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -431,8 +433,6 @@ def read_net_counters(
 ) -> tuple[int, int] | None:
     if not interface:
         return None
-    import sys
-
     if sys.platform == "darwin":
         from platform_collectors import MacOSCollector
 
@@ -452,6 +452,112 @@ def read_net_counters(
         if len(fields) >= 9:
             return int(fields[0]), int(fields[8])
     return None
+
+
+def _default_usage_history_path() -> Path:
+    state_root = Path(
+        os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+    )
+    return state_root / "npl" / "usage-history.json"
+
+
+def sample_macos_usage(
+    interfaces: list[str | None],
+    now: datetime,
+    history_path: Path | None = None,
+    counters_reader: Callable[[str | None], tuple[int, int] | None] = read_net_counters,
+) -> dict[str, dict[str, list[dict[str, int]]]]:
+    """Persist sampled macOS byte deltas and return vnstat-shaped buckets."""
+    history_path = Path(history_path) if history_path else _default_usage_history_path()
+    try:
+        document = json.loads(history_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            document = {}
+    except (OSError, json.JSONDecodeError):
+        document = {}
+    stored = document.get("interfaces")
+    if not isinstance(stored, dict):
+        stored = {}
+    timestamp = int(now.timestamp())
+    bucket_timestamp = timestamp // 300 * 300
+    cutoff = timestamp - 31 * 86400
+    histories: dict[str, dict[str, list[dict[str, int]]]] = {}
+    changed = False
+
+    for interface in dict.fromkeys(item for item in interfaces if item):
+        current = counters_reader(interface)
+        if current is None:
+            continue
+        try:
+            current_rx, current_tx = int(current[0]), int(current[1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            continue
+        state = stored.get(interface)
+        if not isinstance(state, dict):
+            state = {"samples": []}
+            stored[interface] = state
+        samples = state.get("samples")
+        if not isinstance(samples, list):
+            samples = []
+            state["samples"] = samples
+        previous = state.get("last")
+        if isinstance(previous, list) and len(previous) == 2:
+            try:
+                previous_rx, previous_tx = int(previous[0]), int(previous[1])
+            except (TypeError, ValueError, OverflowError):
+                previous_rx = previous_tx = None
+            if previous_rx is not None and previous_tx is not None:
+                rx = max(0, current_rx - previous_rx)
+                tx = max(0, current_tx - previous_tx)
+                if current_rx < previous_rx:
+                    rx = max(0, current_rx)
+                if current_tx < previous_tx:
+                    tx = max(0, current_tx)
+            else:
+                rx = tx = 0
+            if rx or tx:
+                if (
+                    samples
+                    and isinstance(samples[-1], dict)
+                    and samples[-1].get("timestamp") == bucket_timestamp
+                ):
+                    samples[-1]["rx"] = int(samples[-1].get("rx", 0)) + rx
+                    samples[-1]["tx"] = int(samples[-1].get("tx", 0)) + tx
+                else:
+                    samples.append(
+                        {"timestamp": bucket_timestamp, "rx": rx, "tx": tx}
+                    )
+        state["last"] = [current_rx, current_tx]
+        state["samples"] = [
+            item
+            for item in samples
+            if isinstance(item, dict)
+            and isinstance(item.get("timestamp"), (int, float))
+            and item["timestamp"] >= cutoff
+        ]
+        records = state["samples"]
+        histories[interface] = {"hour": records, "day": records, "month": records}
+        changed = True
+
+    if changed:
+        document["interfaces"] = stored
+        temporary_path: Path | None = None
+        try:
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=history_path.parent, delete=False
+            ) as handle:
+                temporary_path = Path(handle.name)
+                json.dump(document, handle, separators=(",", ":"))
+            temporary_path.chmod(0o600)
+            temporary_path.replace(history_path)
+        except OSError:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+    return histories
 
 
 def rates_from_counters(
@@ -668,14 +774,22 @@ def load_config(path: Path | None = None) -> tuple[dict[str, Any], str | None]:
     return config, None
 
 
-def _usage_block(interface: str | None, now: datetime) -> dict[str, Any]:
-    traffic = read_vnstat(interface) if interface else {}
+def _usage_block(
+    interface: str | None,
+    now: datetime,
+    traffic: dict[str, Any] | None = None,
+    history_source: str = "vnstat",
+) -> dict[str, Any]:
+    if traffic is None:
+        traffic = read_vnstat(interface) if interface else {}
+    days = traffic.get("day", [])
     return {
         "interface": interface,
         **usage_windows(traffic, now),
         "this_month": month_usage(traffic, now),
-        "daily_series": daily_series(traffic.get("day", []), now),
-        "days_available": available_days(traffic.get("day", []), now),
+        "daily_series": daily_series(days, now),
+        "days_available": available_days(days, now),
+        "history_source": history_source,
     }
 
 
@@ -692,8 +806,25 @@ def collect_snapshot(
     if configured_vpn:
         network = replace(network, vpn_interface=configured_vpn)
     public = read_ip_info(bool(network.vpn_interface), now=now)
-    physical = _usage_block(network.physical_interface, now)
-    vpn = _usage_block(network.vpn_interface, now)
+    if sys.platform == "darwin":
+        histories = sample_macos_usage(
+            [network.physical_interface, network.vpn_interface], now
+        )
+        physical = _usage_block(
+            network.physical_interface,
+            now,
+            histories.get(network.physical_interface or "", {}),
+            "local",
+        )
+        vpn = _usage_block(
+            network.vpn_interface,
+            now,
+            histories.get(network.vpn_interface or "", {}),
+            "local",
+        )
+    else:
+        physical = _usage_block(network.physical_interface, now)
+        vpn = _usage_block(network.vpn_interface, now)
     budget_gb = float(config.get("monthly_budget_gb", 0) or 0)
     budget_limit = int(budget_gb * 1024**3) if budget_gb > 0 else None
     month_total = physical["this_month"]
