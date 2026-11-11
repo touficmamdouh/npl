@@ -221,6 +221,7 @@ class NethogsCollector(_CommandCollector):
         self._process: subprocess.Popen[str] | None = None
         self._started_refresh = False
         self._refresh_lines: list[str] = []
+        self._diagnostic_lines: list[str] = []
 
     def collect(self) -> list[CumulativeProcessUsage]:
         delay = max(1, round(self.interval))
@@ -242,11 +243,12 @@ class NethogsCollector(_CommandCollector):
             line = self._process.stdout.readline()
             if not line:
                 returncode = self._process.poll()
+                diagnostics = "; ".join(self._diagnostic_lines)
                 self.close()
                 if returncode not in (None, 0):
+                    detail = diagnostics or "check capture permissions and active interfaces"
                     raise CollectorUnavailable(
-                        "nethogs could not capture process usage; "
-                        "check capture permissions and run it once manually"
+                        f"nethogs could not capture process usage: {detail}"
                     )
                 raise CollectorUnavailable(
                     f"nethogs stopped while collecting usage (exit {returncode})"
@@ -260,6 +262,8 @@ class NethogsCollector(_CommandCollector):
                 self._refresh_lines = []
             elif self._started_refresh:
                 self._refresh_lines.append(line)
+            elif line.strip() and len(self._diagnostic_lines) < 4:
+                self._diagnostic_lines.append(line.strip())
 
     def close(self) -> None:
         if self._process is not None:
@@ -272,6 +276,7 @@ class NethogsCollector(_CommandCollector):
         self._process = None
         self._started_refresh = False
         self._refresh_lines = []
+        self._diagnostic_lines = []
 
 
 class NettopCollector(_CommandCollector):

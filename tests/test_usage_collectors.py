@@ -120,12 +120,15 @@ class _FakeProcess:
 
 class TestNethogsCollector(unittest.TestCase):
     def test_reports_capture_permission_when_nethogs_exits_with_error(self):
-        fake_process = _FakeProcess("")
+        fake_process = _FakeProcess(
+            "Failed to get interface addresses\n"
+            "No devices to monitor.\n"
+        )
         fake_process.returncode = 1
         with patch("usage_collectors.subprocess.Popen", return_value=fake_process):
             collector = NethogsCollector(interval=5)
 
-            with self.assertRaisesRegex(CollectorUnavailable, "capture permissions"):
+            with self.assertRaisesRegex(CollectorUnavailable, "No devices to monitor"):
                 collector.collect()
 
     def test_reuses_one_long_lived_process_for_multiple_refreshes(self):
