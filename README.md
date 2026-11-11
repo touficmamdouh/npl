@@ -50,6 +50,11 @@ npl --interface wlp3s0
 npl usage today
 npl usage week --json
 npl usage month --limit 10
+
+# Flag aliases are also supported
+npl usage --today
+npl usage --week --json
+npl usage --month --limit 10
 ```
 
 Interactive keys:

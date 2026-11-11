@@ -38,6 +38,14 @@ APP_VERSION = "0.1.0"
 SAMPLE_INTERVAL_SECONDS = 2.0
 
 
+class UsagePeriodFlag(argparse.Action):
+    """Accept report periods in flag form, such as ``usage --month``."""
+
+    def __call__(self, parser, namespace, values, option_string=None) -> None:
+        setattr(namespace, "usage_command", self.const)
+        setattr(namespace, "period", self.const)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="npl",
@@ -66,7 +74,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command")
     usage = commands.add_parser("usage", help="record and report per-process usage")
-    usage_commands = usage.add_subparsers(dest="usage_command", required=True)
+    usage.add_argument(
+        "--today", dest="period_flag", action=UsagePeriodFlag, nargs=0, const="today"
+    )
+    usage.add_argument(
+        "--week", dest="period_flag", action=UsagePeriodFlag, nargs=0, const="week"
+    )
+    usage.add_argument(
+        "--month", dest="period_flag", action=UsagePeriodFlag, nargs=0, const="month"
+    )
+    usage.add_argument("--limit", type=int, default=20)
+    usage.add_argument("--database")
+    usage.add_argument("--json", action="store_true")
+    usage_commands = usage.add_subparsers(dest="usage_command", required=False)
     record = usage_commands.add_parser("record", help="record process network usage")
     record.add_argument("--interval", type=float, default=5.0)
     record.add_argument("--database")
@@ -354,7 +374,8 @@ def _print_snapshot(snapshot: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     config, config_warning = load_config()
     if args.interface:
         config["physical_interface"] = args.interface
@@ -362,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"npl: {config_warning}", file=sys.stderr)
 
     if args.command == "usage":
+        if args.usage_command is None:
+            parser.error("the following arguments are required: usage_command or --today/--week/--month")
         if args.usage_command == "record":
             return run_usage_record(args)
         if args.usage_command.endswith("-service"):

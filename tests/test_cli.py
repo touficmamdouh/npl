@@ -50,6 +50,14 @@ class TestCli(unittest.TestCase):
         self.assertEqual(args.limit, 5)
         self.assertEqual(args.database, "/tmp/usage.db")
 
+    def test_usage_period_flag_aliases_accept_report_periods(self):
+        for period in ("today", "week", "month"):
+            with self.subTest(period=period):
+                args = build_parser().parse_args(["usage", f"--{period}"])
+
+                self.assertEqual(args.usage_command, period)
+                self.assertEqual(args.period, period)
+
     def test_usage_record_reports_collector_failure(self):
         args = build_parser().parse_args(["usage", "record"])
         error_output = io.StringIO()

@@ -243,6 +243,11 @@ class NethogsCollector(_CommandCollector):
             if not line:
                 returncode = self._process.poll()
                 self.close()
+                if returncode not in (None, 0):
+                    raise CollectorUnavailable(
+                        "nethogs could not capture process usage; "
+                        "check capture permissions and run it once manually"
+                    )
                 raise CollectorUnavailable(
                     f"nethogs stopped while collecting usage (exit {returncode})"
                 )
