@@ -12,8 +12,22 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
-from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Static
+try:
+    from textual.app import App, ComposeResult
+    from textual.widgets import Footer, Header, Static
+    TEXTUAL_AVAILABLE = True
+except ModuleNotFoundError as exc:
+    if not (exc.name == "textual" or (exc.name or "").startswith("textual.")):
+        raise
+
+    TEXTUAL_AVAILABLE = False
+
+    class App:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    ComposeResult = Any
+    Footer = Header = Static = object
 
 from collectors import (
     collect_snapshot,
@@ -414,6 +428,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.once:
         _print_snapshot(snapshot)
         return 0
+
+    if not TEXTUAL_AVAILABLE:
+        print(
+            "npl: the interactive dashboard requires Textual; "
+            "install requirements.txt first",
+            file=sys.stderr,
+        )
+        return 1
 
     app = NplApp(snapshot, config)
     app.warning = config_warning

@@ -1,5 +1,8 @@
 import unittest
 import io
+import os
+import subprocess
+import sys
 import tempfile
 from unittest.mock import Mock, patch
 from contextlib import redirect_stderr
@@ -15,6 +18,32 @@ from usage_collectors import CollectorUnavailable
 
 
 class TestCli(unittest.TestCase):
+    def test_usage_cli_can_import_without_textual(self):
+        code = """
+import builtins
+import sys
+
+real_import = builtins.__import__
+
+def block_textual(name, *args, **kwargs):
+    if name == "textual" or name.startswith("textual."):
+        raise ModuleNotFoundError("No module named 'textual'", name="textual")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = block_textual
+import npl
+assert npl.build_parser().parse_args(["usage", "record"]).usage_command == "record"
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_json_and_interface_flags(self):
         args = build_parser().parse_args(["--json", "--interface", "wlp3s0"])
         self.assertTrue(args.json)
