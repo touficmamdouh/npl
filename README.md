@@ -8,7 +8,7 @@ an on-demand speed test, and local network information.
 
 - Python 3.11 or newer
 - Textual 8.2.7
-- Linux: `vnstat`, `ip`, `nmcli`, `iw`, `curl`, `ping`
+- Linux: `vnstat`, `nethogs`, `ip`, `nmcli`, `iw`, `curl`, `ping`
 - macOS: `curl`, `ping`, `route`, `ifconfig`, `scutil` (optional Wi-Fi data uses `networksetup`)
 
 ## One-line install
@@ -47,6 +47,9 @@ npl --once
 npl --json
 npl --speedtest
 npl --interface wlp3s0
+npl usage today
+npl usage week --json
+npl usage month --limit 10
 ```
 
 Interactive keys:
@@ -57,6 +60,30 @@ Interactive keys:
 - `i` switch live throughput between physical and VPN interfaces
 - `p` pause or resume live throughput
 - `?` show help
+
+## Per-process usage history
+
+The process history starts when the recorder starts; it cannot recover usage
+from before that point. Install and start the user-level recorder explicitly:
+
+```bash
+npl usage install-service
+npl usage start-service
+```
+
+Then query separate local periods:
+
+```bash
+npl usage today
+npl usage week
+npl usage month --json
+```
+
+Use `npl usage stop-service` to stop recording and `npl usage
+uninstall-service` to remove the service file. Linux uses `nethogs` and may
+need packet-capture capabilities; macOS uses the built-in `nettop`. NPL never
+starts the service automatically and keeps the history in a local SQLite
+database.
 
 ## Configuration
 
@@ -71,6 +98,8 @@ consume about 12 MB per run.
 - `ipinfo.io` supplies public IP metadata.
 - Cloudflare speed endpoints supply the on-demand speed test.
 - `ip`, `nmcli`, `iw`, and `ping` supply local network details.
+- `nethogs` on Linux and `nettop` on macOS supply per-process counters for the
+  local usage history.
 
 Physical and VPN usage are always separate and never added together. The
 monthly budget uses the physical interface because it best matches the

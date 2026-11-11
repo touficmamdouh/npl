@@ -1,0 +1,11 @@
+[Unit]
+Description=NPL per-process network usage recorder
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/npl usage record
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

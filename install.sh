@@ -21,6 +21,7 @@ if [[ "$OS_NAME" == "Linux" && "$SKIP_APT" != "1" ]]; then
   command -v curl >/dev/null 2>&1 || missing+=(curl)
   command -v git >/dev/null 2>&1 || missing+=(git)
   command -v vnstat >/dev/null 2>&1 || missing+=(vnstat)
+  command -v nethogs >/dev/null 2>&1 || missing+=(nethogs)
   command -v ip >/dev/null 2>&1 || missing+=(iproute2)
   command -v nmcli >/dev/null 2>&1 || missing+=(network-manager)
   command -v iw >/dev/null 2>&1 || missing+=(iw)

@@ -26,6 +26,13 @@ from formatting import render_dashboard
 from usage_collectors import CollectorUnavailable, iter_usage_samples
 from usage_formatting import render_usage_report
 from usage_store import UsageStore, period_bounds
+from usage_services import (
+    ServiceUnavailable,
+    install_usage_service,
+    start_usage_service,
+    stop_usage_service,
+    uninstall_usage_service,
+)
 
 APP_VERSION = "0.1.0"
 SAMPLE_INTERVAL_SECONDS = 2.0
@@ -70,6 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
         report.add_argument("--limit", type=int, default=20)
         report.add_argument("--database")
         report.add_argument("--json", action="store_true")
+    for service_command in (
+        "install-service",
+        "start-service",
+        "stop-service",
+        "uninstall-service",
+    ):
+        usage_commands.add_parser(service_command, help=f"{service_command.replace('-', ' ')}")
     return parser
 
 
@@ -117,6 +131,26 @@ def run_usage_report(args: argparse.Namespace) -> int:
             json_output=args.json,
         )
     )
+    return 0
+
+
+def run_usage_service(args: argparse.Namespace) -> int:
+    try:
+        if args.usage_command == "install-service":
+            path = install_usage_service()
+            print(f"Installed usage service file: {path}")
+        elif args.usage_command == "start-service":
+            start_usage_service()
+            print("NPL usage service started")
+        elif args.usage_command == "stop-service":
+            stop_usage_service()
+            print("NPL usage service stopped")
+        else:
+            uninstall_usage_service()
+            print("NPL usage service removed")
+    except ServiceUnavailable as exc:
+        print(f"npl usage: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -325,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "usage":
         if args.usage_command == "record":
             return run_usage_record(args)
+        if args.usage_command.endswith("-service"):
+            return run_usage_service(args)
         return run_usage_report(args)
 
     if args.speedtest:
