@@ -1,0 +1,5 @@
+NetHogs version 0.9.0
+/usr/bin/curl/42/1000	1000	2000
+/usr/bin/browser/43/1000	3000	4000
+unknown TCP	50	75
+not a usage row
