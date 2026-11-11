@@ -1,7 +1,17 @@
 import unittest
+import io
+import tempfile
 from unittest.mock import Mock, patch
+from contextlib import redirect_stderr
 
-from npl import APP_VERSION, NplApp, SAMPLE_INTERVAL_SECONDS, build_parser
+from npl import (
+    APP_VERSION,
+    NplApp,
+    SAMPLE_INTERVAL_SECONDS,
+    build_parser,
+    run_usage_record,
+)
+from usage_collectors import CollectorUnavailable
 
 
 class TestCli(unittest.TestCase):
@@ -29,6 +39,29 @@ class TestCli(unittest.TestCase):
             app.tick()
 
         app.update_view.assert_not_called()
+
+    def test_usage_period_command_accepts_report_options(self):
+        args = build_parser().parse_args(
+            ["usage", "week", "--json", "--limit", "5", "--database", "/tmp/usage.db"]
+        )
+
+        self.assertEqual(args.usage_command, "week")
+        self.assertTrue(args.json)
+        self.assertEqual(args.limit, 5)
+        self.assertEqual(args.database, "/tmp/usage.db")
+
+    def test_usage_record_reports_collector_failure(self):
+        args = build_parser().parse_args(["usage", "record"])
+        error_output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "npl.iter_usage_samples",
+            side_effect=CollectorUnavailable("nethogs permission denied"),
+        ), redirect_stderr(error_output):
+            args.database = f"{directory}/usage.db"
+            result = run_usage_record(args)
+
+        self.assertEqual(result, 1)
+        self.assertIn("nethogs permission denied", error_output.getvalue())
 
 
 if __name__ == "__main__":

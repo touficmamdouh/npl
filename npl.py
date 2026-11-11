@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
+from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
 from textual.app import App, ComposeResult
@@ -20,6 +23,9 @@ from collectors import (
     run_speedtest,
 )
 from formatting import render_dashboard
+from usage_collectors import CollectorUnavailable, iter_usage_samples
+from usage_formatting import render_usage_report
+from usage_store import UsageStore, period_bounds
 
 APP_VERSION = "0.1.0"
 SAMPLE_INTERVAL_SECONDS = 2.0
@@ -51,7 +57,67 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {APP_VERSION}",
     )
+    commands = parser.add_subparsers(dest="command")
+    usage = commands.add_parser("usage", help="record and report per-process usage")
+    usage_commands = usage.add_subparsers(dest="usage_command", required=True)
+    record = usage_commands.add_parser("record", help="record process network usage")
+    record.add_argument("--interval", type=float, default=5.0)
+    record.add_argument("--database")
+    record.add_argument("--retention-days", type=int, default=90)
+    for period in ("today", "week", "month"):
+        report = usage_commands.add_parser(period, help=f"report usage for {period}")
+        report.set_defaults(period=period)
+        report.add_argument("--limit", type=int, default=20)
+        report.add_argument("--database")
+        report.add_argument("--json", action="store_true")
     return parser
+
+
+def default_usage_database() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "npl" / "usage.db"
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return data_home / "npl" / "usage.db"
+
+
+def run_usage_record(args: argparse.Namespace) -> int:
+    store = UsageStore(args.database or default_usage_database())
+    try:
+        for deltas in iter_usage_samples(float(args.interval)):
+            store.record_deltas(deltas)
+            cutoff = time.time() - max(1, int(args.retention_days)) * 86400
+            store.prune(cutoff)
+    except KeyboardInterrupt:
+        return 0
+    except CollectorUnavailable as exc:
+        print(f"npl usage: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        store.close()
+    return 0
+
+
+def run_usage_report(args: argparse.Namespace) -> int:
+    now = datetime.now().astimezone()
+    start, end = period_bounds(args.period, now)
+    store = UsageStore(args.database or default_usage_database())
+    try:
+        rows = store.summarize(start, end, args.limit)
+        started_at = store.first_observed_at()
+    finally:
+        store.close()
+    sources = {row.source for row in rows}
+    source = next(iter(sources)) if len(sources) == 1 else ("mixed" if sources else None)
+    print(
+        render_usage_report(
+            rows,
+            period=args.period,
+            source=source,
+            started_at=started_at,
+            json_output=args.json,
+        )
+    )
+    return 0
 
 
 class NplApp(App):
@@ -255,6 +321,11 @@ def main(argv: list[str] | None = None) -> int:
         config["physical_interface"] = args.interface
     if config_warning:
         print(f"npl: {config_warning}", file=sys.stderr)
+
+    if args.command == "usage":
+        if args.usage_command == "record":
+            return run_usage_record(args)
+        return run_usage_report(args)
 
     if args.speedtest:
         result = run_speedtest(

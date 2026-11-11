@@ -105,6 +105,16 @@ class TestUsageStore(unittest.TestCase):
             self.assertEqual(rows[0].total_bytes, 125)
             store.close()
 
+    def test_first_observation_returns_the_oldest_sample_time(self):
+        now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(Path(directory) / "usage.db")
+            self.assertIsNone(store.first_observed_at())
+            store.record_deltas([delta(now), delta(now - timedelta(days=1))])
+
+            self.assertEqual(store.first_observed_at(), now - timedelta(days=1))
+            store.close()
+
     def test_period_bounds_use_local_calendar(self):
         now = datetime(2026, 11, 11, 15, 30, tzinfo=timezone(timedelta(hours=2)))
 

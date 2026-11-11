@@ -175,6 +175,14 @@ class UsageStore:
         self.connection.commit()
         return cursor.rowcount
 
+    def first_observed_at(self) -> datetime | None:
+        row = self.connection.execute(
+            "SELECT MIN(observed_at) AS observed_at FROM usage_samples"
+        ).fetchone()
+        if row is None or row["observed_at"] is None:
+            return None
+        return datetime.fromtimestamp(float(row["observed_at"]), timezone.utc)
+
     def close(self) -> None:
         self.connection.close()
 
