@@ -4,7 +4,12 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path.cwd()
-hiddenimports = collect_submodules("textual")
+hiddenimports = collect_submodules("textual") + [
+    "usage_store",
+    "usage_collectors",
+    "usage_formatting",
+    "usage_services",
+]
 
 a = Analysis(
     [str(ROOT / "npl.py")],

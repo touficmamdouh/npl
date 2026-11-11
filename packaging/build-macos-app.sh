@@ -19,3 +19,4 @@ python3 -m PyInstaller --clean --noconfirm --name npl \
   --distpath "$BUILD_DIR/dist" --workpath "$BUILD_DIR/work" \
   "$ROOT/packaging/npl.spec"
 echo "Built $BUILD_DIR/dist/npl for this Mac architecture"
+echo "Per-process recording uses the host nettop executable; it is not bundled."

@@ -13,4 +13,13 @@ dependencies = ["textual==8.2.7"]
 npl = "npl:main"
 
 [tool.setuptools]
-py-modules = ["npl", "collectors", "formatting", "platform_collectors"]
+py-modules = [
+    "npl",
+    "collectors",
+    "formatting",
+    "platform_collectors",
+    "usage_store",
+    "usage_collectors",
+    "usage_formatting",
+    "usage_services",
+]

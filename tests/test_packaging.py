@@ -15,9 +15,27 @@ class TestPackagingScaffolding(unittest.TestCase):
             "packaging/npl.desktop",
             "packaging/npl.svg",
             "packaging/build-macos-app.sh",
+            "packaging/systemd/npl-usage.service",
+            "packaging/macos/com.npl.usage.plist",
         ):
             with self.subTest(relative=relative):
                 self.assertTrue((ROOT / relative).is_file())
+
+    def test_python_distribution_includes_usage_modules(self):
+        pyproject = (ROOT / "pyproject.toml").read_text()
+        for module in (
+            "usage_store",
+            "usage_collectors",
+            "usage_formatting",
+            "usage_services",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(f'"{module}"', pyproject)
+
+    def test_host_collectors_are_not_runtime_python_dependencies(self):
+        pyproject = (ROOT / "pyproject.toml").read_text()
+        self.assertNotIn('"nethogs"', pyproject)
+        self.assertNotIn('"nettop"', pyproject)
 
 
 if __name__ == "__main__":
